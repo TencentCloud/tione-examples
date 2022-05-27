@@ -1,0 +1,49 @@
+{
+    "apis": [     
+        {
+            "protocol": "http",
+            "url": "/v1/models/m:predict",
+            "method": "post",
+            "request": {
+                "Content-type": "application/json",
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "img_data": {
+                            "items": [
+                                {
+                                    "type": "object",
+                                    "properties": {}
+                                }
+                            ],
+                            "type": "array"
+                        }
+                    }
+                }
+            },
+            "response": {
+                "Content-type": "application/json",
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "rsp_data": {
+                            "type": "array",
+                               "items": [
+                                    {
+                                        "type": "object",
+                                        "properties": { }
+                                    }
+                                ]
+                        }
+                   }
+                }
+            },
+            "request_example": {
+                "image": "<base64>/<imageUrl>"
+            },
+            "response_example": {
+                "type": "classification",
+                "pred": "19"
+            }
+        }]
+}
