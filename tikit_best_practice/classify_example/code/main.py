@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
+import torch.multiprocessing as mp
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
@@ -16,9 +17,14 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 
 from torch.cuda import amp
+from torch.cuda.amp import GradScaler
+from tiacc_training import tiacc_training, tiacc_init
 
-from tikit.client import Client
-client = Client("your_secret_id", "your_secret_key", "<region>")
+try:
+    from tikit.client import Client
+    client = Client("your_secret_id", "your_secret_key", "<region>")
+except Exception as e:
+    print("TIACC - run local!")
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -28,7 +34,7 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
-                    choices=model_names,
+                    #choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
@@ -83,10 +89,12 @@ parser.add_argument("--local_world_size", type=int, default=1)
 
 parser.add_argument('--model_save_path', default='/opt/ml/model/', type=str,
                     help='model save path')
+parser.add_argument('--tiacc', dest='tiacc', action='store_true',
+                    help='use tiacc-training acceleration')
 
 best_acc1 = 0
 
-
+@tiacc_init(params={'training_framework': 'pytorch'})
 def main():
     args = parser.parse_args()
 
@@ -115,14 +123,16 @@ def main_worker(ngpus_per_node, local_rank, args):
     n = torch.cuda.device_count() // ngpus_per_node
     device_ids = list(range(local_rank * n, (local_rank + 1) * n))
     args.gpu = device_ids[0]
+    args.total_batch_size = dist.get_world_size() * args.batch_size
 
     print("TIACC - args.gpu", args.gpu, local_rank)
+    print("TIACC - total_batch_size", args.total_batch_size)
 
     print(
         f"TIACC - [{os.getpid()}] rank = {dist.get_rank()}, "
         + f"world_size = {dist.get_world_size()}, n = {n}, device_ids = {device_ids} \n", end=''
     )
-
+   
     # Data loading code
     #traindir = os.path.join(args.data, 'train/')
     #valdir = os.path.join(args.data, 'val/')
@@ -159,42 +169,44 @@ def main_worker(ngpus_per_node, local_rank, args):
     print(f"TIACC - valset size: {len(val_dataset)}")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+            num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
-
+        
     # create model
-    if args.pretrained:
+    if args.arch == "resnest50":
+        from resnest import resnest50
+        model = resnest50()
+    elif args.arch not in model_names:
+        logging.error("not support this arch function, please choose one of {}".format(model_names))
+        sys.exit(-1)
+    elif args.pretrained:
         print("TIACC - using pre-trained model '{}'".format(args.arch))
         model = models.__dict__[args.arch](pretrained=True)
     else:
-        print("TIACC - creating model '{}'".format(args.arch))
         model = models.__dict__[args.arch]()
 
     #last fc
     num_fc_feat = model.fc.in_features
     model.fc = nn.Linear(num_fc_feat, num_classes)
 
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
-
     if args.gpu is not None:
         torch.cuda.set_device(args.gpu)
         model.cuda(args.gpu)
-
-        #model, optimizer = amp.initialize(model, optimizer)
-
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=device_ids)
     else:
         model.cuda()
         model = torch.nn.parallel.DistributedDataParallel(model)
 
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss().cuda(args.gpu)
 
     # optionally resume from a checkpoint
@@ -227,13 +239,35 @@ def main_worker(ngpus_per_node, local_rank, args):
 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [6, 8], 0.1)
 
+    # add mixed precision scaler
+    args.mixed_precision = args.tiacc
+    if args.tiacc:
+        schedulePolicy = "TimeSchedulePolicy"
+        policy = tiacc_training.calc.MixedPrecision_TrainingPolicy(policy=schedulePolicy, 
+                                                                   start_time=args.start_epoch,
+                                                                   end_time=args.epochs)
+        optimizer = tiacc_training.calc.get_fused_optimizer(optimizer)
+        #policy = MixedPrecision_TrainingPolicy(policy=schedulePolicy, 
+        #                                       start_time=0, end_time=3)
+
+    scaler = torch.cuda.amp.GradScaler(
+            init_scale=128,
+            growth_factor=2,
+            backoff_factor=0.5,
+            growth_interval=1000000000,
+            enabled=args.mixed_precision,
+        )
+
     for epoch in range(args.start_epoch, args.epochs+1):
         train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer, epoch, args)
         scheduler.step()
 
+        if args.tiacc:
+            args.mixed_precision = policy.enable_mixed_precision(epoch, scaler=scaler)
+
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
+        train(train_loader, model, criterion, optimizer, epoch, scaler, args)
 
         # evaluate on validation set
         acc1 = validate(val_loader, model, criterion, epoch, args)
@@ -253,9 +287,10 @@ def main_worker(ngpus_per_node, local_rank, args):
             }, is_best, args.model_save_path)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, args):
+def train(train_loader, model, criterion, optimizer, epoch, scaler, args):
     # torch amp
     #scaler = amp.GradScaler()
+    speed = AverageMeter('Speed', ':6.3f')
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -268,7 +303,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
     progress = ProgressMeter(
         len(train_loader),
-        [batch_time, data_time, losses, top1, top5],
+        [speed, batch_time, data_time, losses, top1, top5],
         prefix="Epoch: [{}] LR: [{}]".format(epoch, lr_list[0]))
 
     # switch to train mode
@@ -282,8 +317,9 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         if args.gpu is not None:
             images = images.cuda(args.gpu, non_blocking=True)
             target = target.cuda(args.gpu, non_blocking=True)
+            images = images.float()
 
-        with amp.autocast():
+        with amp.autocast(enabled=args.mixed_precision):
             output = model(images)
             loss = criterion(output, target)
 
@@ -293,19 +329,17 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         top1.update(acc1[0], images.size(0))
         top5.update(acc5[0], images.size(0))
 
-        # compute gradient and do SGD step
+        ## compute gradient and do SGD step
         optimizer.zero_grad()
+        #loss.backward()
+        #optimizer.step()
 
-        # TODO if use_fp16
-        # with amp.scale_loss(loss, optimizer) as scaled_loss:
-            #scaled_loss.backward()
-        loss.backward()
-        optimizer.step()
-        #scaler.scale(loss).backward()
-        #scaler.step(optimizer)
-        #scaler.update()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         # measure elapsed time
+        speed.update(args.total_batch_size / (time.time() - end))
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -331,7 +365,8 @@ def validate(val_loader, model, criterion, epoch, args):
         for i, (images, target) in enumerate(val_loader):
             if args.gpu is not None:
                 images = images.cuda(args.gpu, non_blocking=True)
-            target = target.cuda(args.gpu, non_blocking=True)
+                target = target.cuda(args.gpu, non_blocking=True)
+                images = images.float()
 
             # compute output
             output = model(images)
@@ -347,11 +382,17 @@ def validate(val_loader, model, criterion, epoch, args):
             batch_time.update(time.time() - end)
             end = time.time()
 
-            if i % args.print_freq == 0:
+            if i % args.print_freq == 0 and args.local_rank in [-1, 0]:
                 progress.display(i)
 
-        # 上传指标 
-        client.push_training_metrics(int(time.time()), {"acc1": float(format(top1.avg, '.3f')), "acc5": float(format(top5.avg, '.3f'))}, epoch=epoch)
+        try:
+            client.push_training_metrics(int(time.time()), 
+                                         {"acc1": float(format(top1.avg, '.3f')), 
+                                          "acc5": float(format(top5.avg, '.3f'))}, 
+                                         epoch=epoch)
+        except Exception as e:
+            pass
+
         # TODO: this should also be done with the ProgressMeter
         print('TIACC - * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f} Epoch={epoch}'
               .format(top1=top1, top5=top5, epoch=epoch))
