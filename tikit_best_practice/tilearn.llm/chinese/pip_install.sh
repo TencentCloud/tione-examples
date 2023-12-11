@@ -1,0 +1,1 @@
+pip3 install sentencepiece jieba rouge_chinese nltk easydict pandas
