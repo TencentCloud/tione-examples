@@ -1,0 +1,17 @@
+*.pyc
+dist/
+build/
+.eggs/
+language/
+log
+*.log
+*.log.*
+# *.so
+*.bin
+test/nlp_t5_seq2seq/checkpoint/*
+glm/ChatGLM-6B-main/ptuning/output/
+glm/ChatGLM-6B-main-TIACC/ptuning/output/
+tilearn_llm/
+bloomz/bloomz_trainer/test-clm/
+.ipynb_checkpoints
+output
