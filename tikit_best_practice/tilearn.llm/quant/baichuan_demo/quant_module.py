@@ -43,16 +43,16 @@ print('SmoothQuant for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenize
 del model
 torch.cuda.empty_cache()
 
-# weight-only int8
-from tilearn.llm.quant import AutoMinMaxQForCausalLM, MinMaxQuantizeConfig
-# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
-model = AutoMinMaxQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
-quant_config = MinMaxQuantizeConfig(bits=8)
-model.quantize(quant_config=quant_config, need_to_pack=False)
-model.half().cuda()
-print('WeightOnlyInt8 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
-del model
-torch.cuda.empty_cache()
+# # weight-only int8
+# from tilearn.llm.quant import AutoMinMaxQForCausalLM, MinMaxQuantizeConfig
+# # tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+# model = AutoMinMaxQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+# quant_config = MinMaxQuantizeConfig(bits=8)
+# model.quantize(quant_config=quant_config, need_to_pack=False)
+# model.half().cuda()
+# print('WeightOnlyInt8 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
+# del model
+# torch.cuda.empty_cache()
 
 # fp16
 # tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
