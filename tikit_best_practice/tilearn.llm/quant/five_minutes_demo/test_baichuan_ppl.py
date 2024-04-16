@@ -33,3 +33,13 @@ model.half().cuda()
 print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.dataset, args.seed)))
 del model
 torch.cuda.empty_cache()
+
+from tilearn.llm.quant import AutoMinMaxQForCausalLM, MinMaxQuantizeConfig
+# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+model = AutoMinMaxQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+quant_config = MinMaxQuantizeConfig(bits=8)
+model.quantize(quant_config=quant_config, need_to_pack=False)
+model.half().cuda()
+print('WeightOnlyInt8 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.dataset, args.seed)))
+del model
+torch.cuda.empty_cache()

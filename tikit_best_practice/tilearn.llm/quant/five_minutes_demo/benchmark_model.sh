@@ -1,11 +1,11 @@
 # AutoLayerwiseSmoothQ
-python test_baichuan_performance.py -q smoothquant
+python test_baichuan_performance.py --model ./LayerwiseSearchSMQ_Baichuan2-13B-Base -q smoothquant
 
 # WeightOnlyInt8
-python test_baichuan_performance.py -q ifq
+python test_baichuan_performance.py --model ./Baichuan2-13B-Base -q ifq
 
 # Original FP16
-python test_baichuan_performance.py
+python test_baichuan_performance.py --model ./Baichuan2-13B-Base
 
 # L20:
 # AutoLayerwiseSmoothQ performance: batch_size: 16, prompt_size: 1000, first_token_latency:  2387.11 ms, generated_tokens: 100, throughput:  233.47 tokens/second
