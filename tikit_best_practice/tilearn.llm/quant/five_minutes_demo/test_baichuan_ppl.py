@@ -34,6 +34,7 @@ print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokeni
 del model
 torch.cuda.empty_cache()
 
+# weight-only
 from tilearn.llm.quant import AutoMinMaxQForCausalLM, MinMaxQuantizeConfig
 # tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
 model = AutoMinMaxQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
@@ -41,5 +42,25 @@ quant_config = MinMaxQuantizeConfig(bits=8)
 model.quantize(quant_config=quant_config, need_to_pack=False)
 model.half().cuda()
 print('WeightOnlyInt8 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.dataset, args.seed)))
+del model
+torch.cuda.empty_cache()
+
+# smoothquant
+from tilearn.llm.quant import AutoSmoothQForCausalLM, SmoothQuantizeConfig
+# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+model = AutoSmoothQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+model.seqlen = 4096
+print("loading calibdation data")
+dataloader, _ = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, seqlen=model.seqlen, tokenizer=tokenizer)
+print("dataset loading complete")
+quant_config = SmoothQuantizeConfig(bits=8,
+                                    smoothq_quant_output_method='per_channel',
+                                    act_quant='per_token',
+                                    weight_quant='per_channel',
+                                    smooth_alpha=0.5,
+                                    for_fake=True)
+model.quantize(dataloader, quant_config=quant_config, cache_examples_on_gpu=True)
+model.half().cuda()
+print('SmoothQuant for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.dataset, args.seed)))
 del model
 torch.cuda.empty_cache()

@@ -24,4 +24,5 @@ quant_config = LayerwiseSmoothQuantizeConfig(bits=8,
                                     smoothq_quant_output_method='per_channel',
                                     act_quant='per_token',
                                     weight_quant='per_channel')
-model.search(dataloader, quant_config=quant_config, save_dir=args.save_path, alpha_choice=[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95])
+# support examples type: List[Dict[str, torch.Tensor]]
+model.search(examples=dataloader, quant_config=quant_config, save_dir=args.save_path, alpha_choice=[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95])
