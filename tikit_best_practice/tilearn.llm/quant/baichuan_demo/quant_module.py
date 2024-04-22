@@ -15,6 +15,16 @@ args = parser.parse_args()
 
 ###step2: quantizing
 tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+
+# fp16
+# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+model.seqlen = 4096
+model.half().cuda()
+print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
+del model
+torch.cuda.empty_cache()
+
 model = AutoLayerwiseSmoothQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
 model.quantize(save_dir=args.save_path, save_for_inference_param_flag=True)
 model.half().cuda()
@@ -54,11 +64,3 @@ torch.cuda.empty_cache()
 # del model
 # torch.cuda.empty_cache()
 
-# fp16
-# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
-model.seqlen = 4096
-model.half().cuda()
-print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
-del model
-torch.cuda.empty_cache()
