@@ -16,42 +16,42 @@ args = parser.parse_args()
 ###step2: quantizing
 tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
 
-# fp16
-# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
-model.seqlen = 4096
-model.half().cuda()
-print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
-del model
-torch.cuda.empty_cache()
+# # fp16
+# # tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+# model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+# model.seqlen = 4096
+# model.half().cuda()
+# print('Original FP16 for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
+# del model
+# torch.cuda.empty_cache()
 
 model = AutoLayerwiseSmoothQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
 model.quantize(save_dir=args.save_path, save_for_inference_param_flag=True)
 model.half().cuda()
-print('AutoLayerwiseSmoothQ for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
+# print('AutoLayerwiseSmoothQ for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
 # saving
 model.save_quantized(save_dir=args.save_path)
 del model
 torch.cuda.empty_cache()
 
-# smoothquant
-from tilearn.llm.quant import AutoSmoothQForCausalLM, SmoothQuantizeConfig
-# tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
-model = AutoSmoothQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
-print("loading calibdation data")
-dataloader, _ = get_loaders(args.test_data, nsamples=args.nsamples, seed=args.seed, seqlen=model.seqlen, tokenizer=tokenizer)
-print("dataset loading complete")
-quant_config = SmoothQuantizeConfig(bits=8,
-                                    smoothq_quant_output_method='per_channel',
-                                    act_quant='per_token',
-                                    weight_quant='per_channel',
-                                    smooth_alpha=0.5,
-                                    for_fake=True)
-model.quantize(dataloader, quant_config=quant_config, cache_examples_on_gpu=True)
-model.half().cuda()
-print('SmoothQuant for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
-del model
-torch.cuda.empty_cache()
+# # smoothquant
+# from tilearn.llm.quant import AutoSmoothQForCausalLM, SmoothQuantizeConfig
+# # tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+# model = AutoSmoothQForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.float16, trust_remote_code=True)
+# print("loading calibdation data")
+# dataloader, _ = get_loaders(args.test_data, nsamples=args.nsamples, seed=args.seed, seqlen=model.seqlen, tokenizer=tokenizer)
+# print("dataset loading complete")
+# quant_config = SmoothQuantizeConfig(bits=8,
+#                                     smoothq_quant_output_method='per_channel',
+#                                     act_quant='per_token',
+#                                     weight_quant='per_channel',
+#                                     smooth_alpha=0.5,
+#                                     for_fake=True)
+# model.quantize(dataloader, quant_config=quant_config, cache_examples_on_gpu=True)
+# model.half().cuda()
+# print('SmoothQuant for baichuan2-13b PPL is: {}'.format(eval_ppl(model, tokenizer, args.test_data, args.seed)))
+# del model
+# torch.cuda.empty_cache()
 
 # # weight-only int8
 # from tilearn.llm.quant import AutoMinMaxQForCausalLM, MinMaxQuantizeConfig
